@@ -9,8 +9,13 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: validate-integration-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  upstream-validation:
+  integration-validation:
+    name: Integration validation
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -61,18 +66,6 @@ jobs:
         working-directory: upstream/apps/daemon
         run: pnpm exec vitest run tests/project-file-preconditions.test.ts --reporter=verbose
 
-      - name: Build daemon test dependencies
-        working-directory: upstream
-        run: >-
-          pnpm --filter '@open-design/daemon^...'
-          --workspace-concurrency=4
-          --if-present run build
-
-      - name: Run daemon test suite
-        timeout-minutes: 15
-        working-directory: upstream/apps/daemon
-        run: pnpm exec vitest run -c vitest.config.ts --reporter=verbose
-
       - name: Typecheck daemon
         working-directory: upstream
         run: pnpm --filter @open-design/daemon typecheck
@@ -88,3 +81,51 @@ jobs:
       - name: Run repository typecheck
         working-directory: upstream
         run: pnpm typecheck
+
+  daemon-tests:
+    name: Daemon tests (${{ matrix.shard }}/4)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - name: Checkout integration repository
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned OpenDesign upstream
+        uses: actions/checkout@v4
+        with:
+          repository: nexu-io/open-design
+          ref: eca7c7ab989852fb586384e19bcb6a6f2d7321f4
+          path: upstream
+
+      - name: Verify patch applies cleanly
+        run: git -C upstream apply --check "$GITHUB_WORKSPACE/patches/open-design-chatgpt-v0.1.patch"
+
+      - name: Apply integration patch
+        run: git -C upstream apply "$GITHUB_WORKSPACE/patches/open-design-chatgpt-v0.1.patch"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          version: 10.33.2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: upstream/pnpm-lock.yaml
+
+      - name: Install upstream dependencies
+        working-directory: upstream
+        run: pnpm install --frozen-lockfile
+
+      - name: Run daemon test shard
+        timeout-minutes: 15
+        working-directory: upstream
+        env:
+          OD_WATCHER_TEST_DEBUG: "1"
+        run: pnpm --filter @open-design/daemon test --shard=${{ matrix.shard }}/4 --reporter=verbose
