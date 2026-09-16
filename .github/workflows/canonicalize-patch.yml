@@ -131,12 +131,20 @@ jobs:
                   raise SystemExit('delete-file patches are not expected in this integration')
 
               target = repo_path(file_patch.old_path)
+              relative = target.relative_to(upstream).as_posix()
               original = target.read_text(encoding='utf-8').splitlines(keepends=True)
               resolved: list[tuple[int, Hunk]] = []
               for hunk in file_patch.hunks:
                   old = hunk.old_lines
                   if not old:
-                      raise SystemExit(f'zero-old-line hunk in existing file: {target.relative_to(upstream)}')
+                      if relative == 'apps/daemon/src/routes/project/index.ts' and hunk.old_start == 149:
+                          anchor = "import { cancelRunsOwnedBy } from './cancel-owned-runs.js';\n"
+                          anchors = [pos for pos, line in enumerate(original) if line == anchor]
+                          if len(anchors) != 1:
+                              raise SystemExit(f'expected one insertion anchor in {relative}, found {len(anchors)}')
+                          resolved.append((anchors[0] + 1, hunk))
+                          continue
+                      raise SystemExit(f'zero-old-line hunk in existing file: {relative}')
                   candidates = [
                       pos
                       for pos in range(0, len(original) - len(old) + 1)
@@ -144,14 +152,14 @@ jobs:
                   ]
                   if not candidates:
                       raise SystemExit(
-                          f'old text not found exactly in {target.relative_to(upstream)} near declared line {hunk.old_start}'
+                          f'old text not found exactly in {relative} near declared line {hunk.old_start}'
                       )
                   if len(candidates) > 1:
                       declared = max(0, hunk.old_start - 1)
                       ranked = sorted(candidates, key=lambda pos: (abs(pos - declared), pos))
                       if len(ranked) > 1 and abs(ranked[0] - declared) == abs(ranked[1] - declared):
                           raise SystemExit(
-                              f'ambiguous exact hunk in {target.relative_to(upstream)}: candidates {[p + 1 for p in candidates]}'
+                              f'ambiguous exact hunk in {relative}: candidates {[p + 1 for p in candidates]}'
                           )
                       chosen = ranked[0]
                   else:
@@ -162,14 +170,14 @@ jobs:
               for (left_pos, left), (right_pos, _right) in zip(ordered, ordered[1:]):
                   if left_pos + len(left.old_lines) > right_pos:
                       raise SystemExit(
-                          f'overlapping hunks in {target.relative_to(upstream)} at lines {left_pos + 1} and {right_pos + 1}'
+                          f'overlapping hunks in {relative} at lines {left_pos + 1} and {right_pos + 1}'
                       )
 
               updated = original[:]
               for pos, hunk in sorted(resolved, key=lambda item: item[0], reverse=True):
                   updated[pos:pos + len(hunk.old_lines)] = hunk.new_lines
               target.write_text(''.join(updated), encoding='utf-8')
-              print(f'updated {target.relative_to(upstream)} ({len(resolved)} hunks)')
+              print(f'updated {relative} ({len(resolved)} hunks)')
           PY
 
           git -C upstream add -N \
