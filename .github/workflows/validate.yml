@@ -12,7 +12,7 @@ permissions:
 jobs:
   upstream-validation:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Checkout integration repository
         uses: actions/checkout@v4
@@ -61,9 +61,17 @@ jobs:
         working-directory: upstream/apps/daemon
         run: pnpm exec vitest run tests/project-file-preconditions.test.ts --reporter=verbose
 
-      - name: Run daemon test suite
+      - name: Build daemon test dependencies
         working-directory: upstream
-        run: pnpm --filter @open-design/daemon test
+        run: >-
+          pnpm --filter '@open-design/daemon^...'
+          --workspace-concurrency=4
+          --if-present run build
+
+      - name: Run daemon test suite
+        timeout-minutes: 15
+        working-directory: upstream/apps/daemon
+        run: pnpm exec vitest run -c vitest.config.ts --reporter=verbose
 
       - name: Typecheck daemon
         working-directory: upstream
