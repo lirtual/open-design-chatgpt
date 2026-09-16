@@ -29,6 +29,16 @@ The daemon lock serializes mutations that pass through this daemon process. It d
 
 ## Validation state
 
-`git apply --numstat` has been run locally to validate unified-diff syntax. The repository CI performs the stronger check against the exact pinned upstream commit, then runs the focused tests, daemon suite, daemon typecheck/build, repository guard, and root typecheck.
+Repository CI has validated the patch against the exact pinned upstream commit. GitHub Actions run `35083316049` completed successfully with:
 
-Real ChatGPT Web installation/write-path acceptance remains a separate G1/manual gate because it depends on the capabilities enabled for the target ChatGPT account/workspace and cannot be replaced by a mock test.
+- clean patch apply;
+- all three focused integration test files;
+- daemon typecheck;
+- daemon build;
+- repository guard;
+- root repository typecheck;
+- daemon regression suite split into the upstream-style four shards, all successful.
+
+This establishes the repository-side G0/G2 implementation and regression evidence for the pinned upstream baseline.
+
+Real ChatGPT Web installation/write-path acceptance remains a separate G1/manual gate because it depends on the capabilities enabled for the target ChatGPT account/workspace and cannot be replaced by a mock or repository test.
