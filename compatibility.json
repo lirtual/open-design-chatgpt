@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "integrationVersion": "0.1.0-validation",
+  "openDesign": {
+    "repository": "nexu-io/open-design",
+    "commit": "eca7c7ab989852fb586384e19bcb6a6f2d7321f4",
+    "patch": "patches/open-design-chatgpt-v0.1.patch"
+  },
+  "mcp": {
+    "profile": "chatgpt",
+    "requiredTools": [
+      "list_projects",
+      "get_project",
+      "list_files",
+      "get_file",
+      "search_files",
+      "get_artifact",
+      "create_project",
+      "create_artifact",
+      "write_file",
+      "delete_file",
+      "list_skills",
+      "get_preview",
+      "export_artifact"
+    ],
+    "forbiddenTools": [
+      "collect_brief",
+      "confirm_brief",
+      "delete_project",
+      "list_plugins",
+      "list_agents",
+      "start_vela_login",
+      "get_vela_login_status",
+      "start_run",
+      "get_run",
+      "cancel_run"
+    ]
+  }
+}
