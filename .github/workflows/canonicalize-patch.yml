@@ -1,0 +1,57 @@
+name: Canonicalize integration patch
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  canonicalize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout integration repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout pinned OpenDesign upstream
+        uses: actions/checkout@v4
+        with:
+          repository: nexu-io/open-design
+          ref: eca7c7ab989852fb586384e19bcb6a6f2d7321f4
+          path: upstream
+
+      - name: Apply by context and regenerate canonical Git diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          patch_file="$GITHUB_WORKSPACE/patches/open-design-chatgpt-v0.1.patch"
+          canonical="$RUNNER_TEMP/open-design-chatgpt-v0.1.patch"
+
+          patch --batch --forward --fuzz=3 -p1 -d upstream < "$patch_file"
+
+          git -C upstream add -N \
+            apps/daemon/tests/mcp-chatgpt-profile.test.ts \
+            apps/daemon/tests/projects-atomic-write.test.ts \
+            apps/daemon/tests/project-file-preconditions.test.ts
+          git -C upstream diff --binary > "$canonical"
+          test -s "$canonical"
+
+          git -C upstream reset --hard HEAD
+          git -C upstream clean -fd
+          git -C upstream apply --check "$canonical"
+
+          if cmp -s "$canonical" "$patch_file"; then
+            echo 'Patch is already canonical.'
+            exit 0
+          fi
+
+          cp "$canonical" "$patch_file"
+          git config user.name 'open-design-chatgpt-ci'
+          git config user.email 'open-design-chatgpt-ci@users.noreply.github.com'
+          git add patches/open-design-chatgpt-v0.1.patch
+          git commit -m 'fix: canonicalize patch against pinned upstream'
+          git push origin HEAD:main
