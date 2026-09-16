@@ -1,4 +1,4 @@
-# OpenDesign for ChatGPT — validation-first implementation bundle
+# OpenDesign for ChatGPT — validated implementation bundle
 
 This bundle implements the accepted `open-design-chatgpt-spec.md` as a small upstream patch plus a thin ChatGPT integration skill. It is deliberately **not** a second OpenDesign backend, agent runtime, revision service, renderer, or tunnel implementation.
 
@@ -7,7 +7,8 @@ This bundle implements the accepted `open-design-chatgpt-spec.md` as a small ups
 - Upstream: `nexu-io/open-design`
 - Pinned commit: `eca7c7ab989852fb586384e19bcb6a6f2d7321f4`
 - Integration patch: `patches/open-design-chatgpt-v0.1.patch`
-- Integration status: validation-first; upstream test run and real ChatGPT Web write-path acceptance are still required.
+- Implementation/CI status: validated against the pinned upstream commit. GitHub Actions run `35083316049` passed the focused integration tests, daemon typecheck/build, repository guard, root typecheck, and all four daemon test shards.
+- Remaining acceptance gate: real ChatGPT Web installation and write-path acceptance (G1), which depends on the capabilities enabled for the target ChatGPT account/workspace and cannot be replaced by repository tests.
 
 ## Apply
 
@@ -35,20 +36,20 @@ A project created through restricted `create_project` must include a stable expl
 
 ## ChatGPT Web connection
 
-ChatGPT does not directly connect to a localhost MCP server. Use OpenAI's Secure MCP Tunnel for a supported ChatGPT workspace rather than exposing the daemon publicly or adding a custom Cloudflare proxy. The tunnel transports MCP traffic only; preview URLs remain local/same-machine URLs.
+ChatGPT does not directly connect to a localhost MCP server. Use the supported ChatGPT local/private MCP transport for the target workspace rather than exposing the daemon publicly or adding a custom Cloudflare proxy. Preview URLs remain local/same-machine URLs.
 
-Current OpenAI plan availability must be checked at install time. The spec requires write actions, so a plan that only permits read/fetch custom MCP cannot complete the MVP acceptance matrix.
+The spec requires write actions, so G1 must be performed on a ChatGPT account/workspace where the required custom MCP write/modify capabilities are available.
 
 ## Files
 
 - `docs/open-design-chatgpt-spec.md` — accepted specification.
 - `docs/G0-capability-map.md` — pinned source facts and minimum-change mapping.
-- `docs/VALIDATION.md` — commands, blockers, renderer and limit notes.
+- `docs/VALIDATION.md` — automated evidence, manual gate, renderer and limit notes.
 - `docs/IMPLEMENTATION-REPORT.md` — implemented surface, residual boundary, and validation status.
 - `skills/open-design/SKILL.md` — thin ChatGPT integration/router skill.
 - `patches/open-design-chatgpt-v0.1.patch` — upstream code/test patch.
 - `compatibility.json` — pinned compatibility/capability declaration.
-- `.github/workflows/validate.yml` — checks the patch against the exact upstream commit and runs the validation suite.
+- `.github/workflows/validate.yml` — checks the patch against the exact upstream commit and runs focused validation plus the upstream-style four-shard daemon regression suite.
 
 ## Non-goals retained
 
