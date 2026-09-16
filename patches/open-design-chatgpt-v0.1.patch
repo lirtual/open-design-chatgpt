@@ -1,16 +1,20 @@
 diff --git a/apps/daemon/src/mcp.ts b/apps/daemon/src/mcp.ts
-index 7d10e6f..0000000 100644
+index 7d10e6f..774824e 100644
 --- a/apps/daemon/src/mcp.ts
 +++ b/apps/daemon/src/mcp.ts
-@@ -31,3 +31,3 @@ import {
+@@ -36,7 +36,7 @@ import {
+   type McpAnalyticsContextResponse,
    type WorkspaceProjectsResponse,
  } from '@open-design/contracts';
 -import { randomUUID } from 'node:crypto';
 +import { createHash, randomUUID } from 'node:crypto';
-@@ -66,8 +66,19 @@ export const MCP_SERVER_INSTRUCTIONS = [
+ 
+ import { postCreateArtifactRequest } from './artifacts/create.js';
+ import { resolveMcpWorkspaceContext } from './mcp-workspace-context.js';
+@@ -75,10 +75,21 @@ export const MCP_SERVER_INSTRUCTIONS = [
    'Tool names, runtime ids, endpoints, and correlation values are machine protocol. Never repeat them as product copy.',
  ].join('\n');
-+
+ 
 +export const MCP_CHATGPT_INSTRUCTIONS = [
 +  'ChatGPT is the only reasoning agent. OpenDesign is a deterministic local design runtime.',
 +  'Use exact authorized project ids. Do not invoke OpenDesign Agent Run, Cloud login, agent discovery, project deletion, shells, package managers, or arbitrary processes.',
@@ -18,7 +22,7 @@ index 7d10e6f..0000000 100644
 +  'On FILE_VERSION_CONFLICT, re-read and decide again. Never force a stale overwrite and never blindly replay a mutation after transport loss.',
 +  'Use get_preview for a same-machine browser preview and export_artifact for HTML/PDF delivery.',
 +].join('\n');
- 
++
  type JsonObject = Record<string, unknown>;
 +export type McpProfile = 'default' | 'chatgpt';
  interface RunMcpOptions {
@@ -27,22 +31,30 @@ index 7d10e6f..0000000 100644
 +  profile?: McpProfile;
 +  allowedProjectIds?: Iterable<string>;
  }
-@@ -80,4 +91,4 @@ interface ProjectPayload { project?: ProjectSummary; id?: string; name?: string;
+ interface CatalogItem { id: string; name?: string; title?: string; description?: string; summary?: string }
+ interface SkillsPayload { skills?: CatalogItem[] }
+@@ -91,7 +102,7 @@ interface ProjectPayload { project?: ProjectSummary; id?: string; name?: string;
  interface ActiveContext { active?: boolean; projectId?: string; projectName?: string | null; fileName?: string | null; ageMs?: number | null }
  type ResolvedProject = { id: string; name: string; source: 'uuid' | 'id' | 'exact' | 'slug' | 'substring' };
  interface ProjectListCache { baseUrl: string; t: number; list: ProjectSummary[] }
 -interface McpArgs extends JsonObject { project?: unknown; entry?: unknown; include?: unknown; maxBytes?: unknown; path?: unknown; offset?: unknown; limit?: unknown; since?: unknown; query?: unknown; pattern?: unknown; max?: unknown; name?: unknown; content?: unknown; encoding?: unknown; artifactManifest?: unknown; confirm?: unknown; prompt?: unknown; plugin?: unknown; inputs?: unknown; agent?: unknown; model?: unknown; serviceTier?: unknown; apiKey?: unknown; requestId?: unknown; resume?: unknown; runId?: unknown; id?: unknown; designSystem?: unknown; skill?: unknown; skills?: string[]; includeUnavailable?: unknown; artifactType?: unknown; projectTitle?: unknown; locale?: unknown; knownAnswers?: unknown; skip?: unknown; briefDraftId?: unknown; nonce?: unknown; answers?: unknown; externalPluginContext?: unknown; pluginWorkflowId?: unknown }
 +interface McpArgs extends JsonObject { project?: unknown; entry?: unknown; include?: unknown; maxBytes?: unknown; path?: unknown; offset?: unknown; limit?: unknown; since?: unknown; query?: unknown; pattern?: unknown; max?: unknown; name?: unknown; fileName?: unknown; content?: unknown; encoding?: unknown; artifactManifest?: unknown; confirm?: unknown; prompt?: unknown; plugin?: unknown; inputs?: unknown; agent?: unknown; model?: unknown; serviceTier?: unknown; apiKey?: unknown; requestId?: unknown; resume?: unknown; runId?: unknown; id?: unknown; designSystem?: unknown; skill?: unknown; skills?: string[]; includeUnavailable?: unknown; artifactType?: unknown; projectTitle?: unknown; locale?: unknown; knownAnswers?: unknown; skip?: unknown; briefDraftId?: unknown; nonce?: unknown; answers?: unknown; externalPluginContext?: unknown; pluginWorkflowId?: unknown; precondition?: unknown; format?: unknown; title?: unknown; deck?: unknown }
-@@ -93,3 +104,5 @@ interface HandleMcpToolCallOptions {
+ interface ProjectFileBundleEntry { name: string; mime: string; size: number | null; content: string | null; binary: boolean }
+ interface BundleInput { project: ProjectPayload | ProjectSummary; entry: string; files: ProjectFileBundleEntry[]; truncated: boolean; skippedFileCount?: number; active: ActiveContext | null; resolved?: ResolvedProject | null }
+ interface ErrorWithCode { message?: string; code?: string; cause?: { code?: string } }
+@@ -100,6 +111,8 @@ interface HandleMcpToolCallOptions {
+   analyticsHeaders?: Record<string, string>;
    pluginAttribution?: McpPluginAttribution | null;
    briefState?: 'confirmed' | 'skipped' | 'not_applicable';
 +  profile?: McpProfile;
 +  allowedProjectIds?: Set<string>;
  }
-@@ -335,2 +348,19 @@ const PROJECT_ARG = {
+ interface McpPluginAttribution {
+   context: ExternalPluginContext;
+@@ -322,6 +335,23 @@ const PROJECT_ARG = {
    description: 'Project id (UUID) or name substring. Optional; defaults to the active project (expires after ~5 minutes of no OpenDesign activity).',
  } as const;
-+
+ 
 +const FILE_PRECONDITION_ARG = {
 +  type: 'object',
 +  properties: {
@@ -59,7 +71,11 @@ index 7d10e6f..0000000 100644
 +  description:
 +    'Optimistic-concurrency precondition. ChatGPT profile requires exactly one of contentDigest or missing:true for write_file; delete_file requires contentDigest.',
 +} as const;
-@@ -619,6 +649,7 @@ export const TOOL_DEFS = [
++
+ const PLUGIN_WORKFLOW_ID_ARG = {
+   type: 'string',
+   description:
+@@ -621,6 +651,7 @@ export const TOOL_DEFS = [
            enum: ['utf8', 'base64'],
            description: 'utf8 (default) | base64',
          },
@@ -67,7 +83,7 @@ index 7d10e6f..0000000 100644
        },
        required: ['path', 'content'],
        additionalProperties: false,
-@@ -636,6 +667,7 @@ export const TOOL_DEFS = [
+@@ -639,6 +670,7 @@ export const TOOL_DEFS = [
            type: 'string',
            description: 'Project-relative path of the file to delete.',
          },
@@ -75,7 +91,7 @@ index 7d10e6f..0000000 100644
        },
        required: ['path'],
        additionalProperties: false,
-@@ -699,5 +731,47 @@ export const TOOL_DEFS = [
+@@ -708,6 +740,48 @@ export const TOOL_DEFS = [
      },
      annotations: { ...READ_ANNOTATIONS, title: 'List OpenDesign skills' },
    },
@@ -123,7 +139,8 @@ index 7d10e6f..0000000 100644
 +  },
    {
      name: 'list_plugins',
-@@ -848,6 +922,114 @@ export const TOOL_DEFS = [
+     description: 'List installed OpenDesign plugins (packaged design workflows) you can pass to start_run as plugin + inputs.',
+@@ -854,8 +928,116 @@ export const TOOL_DEFS = [
    },
  ];
  
@@ -240,16 +257,26 @@ index 7d10e6f..0000000 100644
 +  }
 +  return null;
  }
-@@ -1500,3 +1679,4 @@ async function observeMcpToolCall(
+ 
+ type RuntimeJsonSchema = {
+@@ -1562,6 +1744,7 @@ async function observeMcpToolCall(
+   daemonTarget: ReturnType<typeof createMcpDaemonTarget>,
    nameValue: unknown,
    args: McpArgs,
 +  policy: Pick<HandleMcpToolCallOptions, 'profile' | 'allowedProjectIds'> = {},
  ): Promise<McpToolCallResult> {
-@@ -1510,2 +1690,3 @@ async function observeMcpToolCall(
+   const name = typeof nameValue === 'string' ? nameValue : 'unknown';
+   const startedAt = Date.now();
+@@ -1648,6 +1831,7 @@ async function observeMcpToolCall(
+       briefStore,
+       analyticsHeaders: session.headers(attribution, requestId),
        pluginAttribution: attribution,
 +      ...policy,
        ...(attribution
-@@ -1700,3 +1881,15 @@ export async function runMcpStdio(options: RunMcpOptions): Promise<void> {
+         ? {
+             briefState: briefStore.briefStateForWorkflow(
+@@ -1806,6 +1990,18 @@ function mcpDeliveryFacts(
+ export async function runMcpStdio(options: RunMcpOptions): Promise<void> {
    const daemonTarget = createMcpDaemonTarget(options);
    const briefStore = createLocalMcpBriefStore();
 +  const configuredProfile = options.profile ?? process.env.OD_MCP_PROFILE ?? 'default';
@@ -265,7 +292,9 @@ index 7d10e6f..0000000 100644
 +        .filter(Boolean);
 +  const allowedProjectIds = new Set(configuredProjectIds);
    let observabilityPromise: Promise<McpObservabilitySession> | null = null;
-@@ -1710,4 +1903,6 @@ export async function runMcpStdio(options: RunMcpOptions): Promise<void> {
+   let closeTransportForIdle: (() => void) | null = null;
+   const idleExit = _createMcpIdleExitController({
+@@ -1821,7 +2017,9 @@ export async function runMcpStdio(options: RunMcpOptions): Promise<void> {
      { name: SERVER_NAME, version: SERVER_VERSION },
      {
        capabilities: { tools: {}, resources: {} },
@@ -273,14 +302,19 @@ index 7d10e6f..0000000 100644
 +      instructions: profile === 'chatgpt'
 +        ? MCP_CHATGPT_INSTRUCTIONS
 +        : [
-@@ -1800,5 +1995,5 @@ export async function runMcpStdio(options: RunMcpOptions): Promise<void> {
+         MCP_SERVER_INSTRUCTIONS,
+         '',
+         'OpenDesign (OD) is a local-first design workspace. The user typically',
+@@ -1934,7 +2132,7 @@ export async function runMcpStdio(options: RunMcpOptions): Promise<void> {
    );
  
    server.setRequestHandler(ListToolsRequestSchema, withMcpActivity(async () => ({
 -    tools: TOOL_DEFS,
 +    tools: localMcpToolDefinitions(profile),
    })));
-@@ -1810,5 +2005,9 @@ export async function runMcpStdio(options: RunMcpOptions): Promise<void> {
+ 
+   server.setRequestHandler(ListResourcesRequestSchema, withMcpActivity(async () => {
+@@ -1970,6 +2168,10 @@ export async function runMcpStdio(options: RunMcpOptions): Promise<void> {
        daemonTarget,
        name,
        args,
@@ -290,21 +324,30 @@ index 7d10e6f..0000000 100644
 +      },
      );
    }));
-@@ -2100,2 +2299,8 @@ function requireString(v: unknown, name: string): asserts v is string {
+ 
+@@ -2031,6 +2233,12 @@ function requireString(v: unknown, name: string): asserts v is string {
    }
  }
-+
+ 
 +function requireStringValue(v: unknown, name: string): asserts v is string {
 +  if (typeof v !== 'string') {
 +    throw new Error(`${name} is required (string).`);
 +  }
 +}
-@@ -2200,2 +2405,4 @@ const PROJECT_OR_RUN_TOOLS = new Set([
++
+ const MCP_CREDENTIAL_FIELD_PATTERN =
+   /^(?:api[_-]?key|authorization|access[_-]?token|refresh[_-]?token|secret|password)$/iu;
+ 
+@@ -2063,6 +2271,8 @@ const PROJECT_OR_RUN_TOOLS = new Set([
+   'list_files',
+   'search_files',
    'get_artifact',
 +  'get_preview',
 +  'export_artifact',
    'write_file',
-@@ -2250,6 +2457,12 @@ async function handleMcpToolCall(
+   'delete_file',
+   'delete_project',
+@@ -2080,6 +2290,12 @@ async function handleMcpToolCall(
    options: HandleMcpToolCallOptions = {},
  ): Promise<McpToolCallResult> {
    try {
@@ -317,7 +360,9 @@ index 7d10e6f..0000000 100644
      const workspaceContext = PROJECT_OR_RUN_TOOLS.has(String(name))
        ? await resolveMcpWorkspaceContext(baseUrl)
        : null;
-@@ -2260,17 +2473,24 @@ async function handleMcpToolCall(
+@@ -2124,22 +2340,29 @@ async function handleMcpToolCall(
+           structuredContent: confirmed as unknown as JsonObject,
+         };
        }
 -      case 'list_projects':
 +      case 'list_projects': {
@@ -348,15 +393,19 @@ index 7d10e6f..0000000 100644
 +            : projects,
 +        });
 +      }
-@@ -2270,3 +2490,3 @@ async function handleMcpToolCall(
+       case 'get_active_context': {
+         const data = await getJson<ActiveContext>(`${baseUrl}/api/active`);
+         if (!data || data.active === false) {
+@@ -2216,7 +2439,7 @@ async function handleMcpToolCall(
+         requireString(path, 'path');
+         const offset = typeof args.offset === 'number' && Number.isFinite(args.offset) ? Math.max(0, Math.floor(args.offset)) : 0;
          const limit = typeof args.limit === 'number' && Number.isFinite(args.limit) ? Math.max(1, Math.floor(args.limit)) : 2000;
 -        return await getFile(baseUrl, id, path, active, resolved, offset, limit, headers);
 +        return await getFile(baseUrl, id, path, active, resolved, offset, limit, headers, profile === 'chatgpt');
        }
-@@ -2280,6 +2500,10 @@ async function handleMcpToolCall(
-       case 'create_artifact':
-         return await createArtifact(baseUrl, args, headers);
-       case 'write_file':
+       case 'get_artifact':
+         return await getArtifact(
+@@ -2250,10 +2473,17 @@ async function handleMcpToolCall(
          return await writeFile(baseUrl, args, headers);
        case 'delete_file':
          return await deleteFile(baseUrl, args, headers);
@@ -364,19 +413,18 @@ index 7d10e6f..0000000 100644
 +        return await getPreview(baseUrl, args, headers);
 +      case 'export_artifact':
 +        return await exportArtifact(baseUrl, args, headers);
-@@ -2290,2 +2514,5 @@ async function handleMcpToolCall(
+       case 'delete_project':
+         return await deleteProject(baseUrl, args, headers);
        case 'create_project':
 -        return await createProject(baseUrl, args, headers);
 +        return await createProject(baseUrl, args, headers, {
 +          profile,
 +          allowedProjectIds,
 +        });
-@@ -2500,19 +2727,30 @@ async function writeFile(
-   baseUrl: string,
-   args: McpArgs,
-   headers?: Record<string, string>,
- ) {
-   const { id, resolved, active } = await resolveProjectArg(baseUrl, args.project, headers);
+       case 'list_skills':
+         return ok(await getJson<SkillsPayload>(`${baseUrl}/api/skills`));
+       case 'list_plugins':
+@@ -2310,16 +2540,27 @@ async function writeFile(
    // The daemon route requires its argv field to be called `name`; the
    // MCP-facing surface uses `path` to match the rest of the file tools.
    requireString(args.path, 'path');
@@ -404,7 +452,10 @@ index 7d10e6f..0000000 100644
 -    body: JSON.stringify({ name: args.path, content: args.content, encoding }),
 +    body: JSON.stringify(body),
    });
-@@ -2550,3 +2788,14 @@ async function deleteFile(
+   if (!resp.ok) {
+     return errorResult(await formatDaemonError(resp, url));
+@@ -2343,7 +2584,18 @@ async function deleteFile(
+     .filter((s) => s.length > 0)
      .map(encodeURIComponent);
    const url = `${baseUrl}/api/projects/${encodeURIComponent(id)}/raw/${segments.join('/')}`;
 -  const resp = await fetch(url, headers ? { method: 'DELETE', headers } : { method: 'DELETE' });
@@ -420,7 +471,10 @@ index 7d10e6f..0000000 100644
 +    ...(Object.keys(requestHeaders).length > 0 ? { headers: requestHeaders } : {}),
 +    ...(body ? { body } : {}),
 +  });
-@@ -2600,10 +2849,29 @@ async function createProject(
+   if (!resp.ok) {
+     return errorResult(await formatDaemonError(resp, url));
+   }
+@@ -2426,12 +2678,31 @@ async function createProject(
    baseUrl: string,
    args: McpArgs,
    headers?: Record<string, string>,
@@ -450,8 +504,9 @@ index 7d10e6f..0000000 100644
 +    options.allowedProjectIds?.add(id);
 +  }
    const body: JsonObject = { id, name: args.name, skipDiscoveryBrief: true };
-@@ -2610,5 +2874,19 @@ async function createProject(
-   // workspace immediately. If workspace authority fails (e.g. the cached
+   if (typeof args.designSystem === 'string' && args.designSystem.length > 0) {
+     body.designSystemId = args.designSystem;
+@@ -2444,6 +2715,20 @@ async function createProject(
    // membership went stale between refreshes), retry headerless once — a
    // headerless create is always legal and the project is lazy-adopted on
    // the next workspace list.
@@ -470,9 +525,12 @@ index 7d10e6f..0000000 100644
 +    }
 +  }
    try {
-@@ -2700,4 +2969,132 @@ async function createProject(
+     return ok(await postJson<JsonObject>(`${baseUrl}/api/projects`, body, headers ?? {}));
+   } catch (err) {
+@@ -2452,6 +2737,134 @@ async function createProject(
+   }
  }
-+
+ 
 +async function getPreview(
 +  baseUrl: string,
 +  args: McpArgs,
@@ -600,18 +658,25 @@ index 7d10e6f..0000000 100644
 +    dataBase64: bytes.toString('base64'),
 +  }, active, resolved));
 +}
- 
++
  // Flatten daemon's plugin record into the few fields an external agent
  // needs to pick a plugin: id, title, description, kind, tags. The raw
-@@ -3100,4 +3443,5 @@ async function getFile(
+ // record carries 16+ fields (fsPath, sourceMarketplaceId, installedAt,
+@@ -3080,6 +3493,7 @@ async function getFile(
    offset = 0,
    limit = 2000,
    headers?: Record<string, string>,
 +  includeDigest = false,
  ) {
-@@ -3110,8 +3454,30 @@ async function getFile(
+   const segments = String(relPath)
+     .split('/')
+@@ -3095,11 +3509,33 @@ async function getFile(
+   }
    const mime = ((resp.headers.get('content-type') || 'application/octet-stream').split(';')[0] ?? 'application/octet-stream').trim();
    if (!isTextualMime(mime)) {
+-    return errorResult(
+-      `file at "${relPath}" has mime "${mime}"; binary content is not yet supported by od mcp. Use list_files to inspect its metadata.`,
+-    );
 +    if (!includeDigest) {
 +      return errorResult(
 +        `file at "${relPath}" has mime "${mime}"; binary content is not yet supported by od mcp. Use list_files to inspect its metadata.`,
@@ -635,22 +700,28 @@ index 7d10e6f..0000000 100644
 +        truncated: false,
 +      },
 +    };
--    return errorResult(
--      `file at "${relPath}" has mime "${mime}"; binary content is not yet supported by od mcp. Use list_files to inspect its metadata.`,
--    );
    }
 -  const text = await resp.text();
 +  const raw = Buffer.from(await resp.arrayBuffer());
 +  const contentDigest = createHash('sha256').update(raw).digest('hex');
 +  const text = raw.toString('utf8');
    const allLines = text.split('\n');
-@@ -3120,2 +3466,5 @@ async function getFile(
+   const totalLines = allLines.length;
+   const start = Math.min(offset, totalLines);
+@@ -3108,6 +3544,9 @@ async function getFile(
+   const truncated = start + returnedLines < totalLines;
+ 
    const extra: string[] = [];
 +  if (includeDigest) {
 +    extra.push(`[od:file-version sha256="${contentDigest}" bytes=${raw.length}]`);
 +  }
    if (active) extra.push(formatActiveEchoLine(active, relPath));
-@@ -3130,7 +3479,19 @@ async function getFile(
+   if (resolved && (resolved.source === 'slug' || resolved.source === 'substring')) {
+     extra.push(`[od:resolved-project id="${resolved.id}" name="${resolved.name}" via="${resolved.source}"]`);
+@@ -3119,12 +3558,24 @@ async function getFile(
+       `[od:file-window offset=${start} returnedLines=${returnedLines} totalLines=${totalLines}${next}]`,
+     );
+   }
 -  return {
 +  const result: McpToolCallResult = {
      content: [
@@ -671,17 +742,22 @@ index 7d10e6f..0000000 100644
 +  }
 +  return result;
  }
+ 
+ // Stamp `usedActiveContext` onto JSON tool responses when the
 diff --git a/apps/daemon/src/project-file-versions.ts b/apps/daemon/src/project-file-versions.ts
-index 1ba2efa..0000000 100644
+index 1ba2efa..d27acb2 100644
 --- a/apps/daemon/src/project-file-versions.ts
 +++ b/apps/daemon/src/project-file-versions.ts
-@@ -60,4 +60,5 @@ export interface ProjectFileVersionLockContext {
+@@ -63,6 +63,7 @@ export interface ProjectFileVersionLockContext {
    createVersion: (content: string, options?: CreateProjectFileVersionOptions) => Promise<ProjectFileVersion>;
    ensureCurrentVersion: (content: string, options?: CreateProjectFileVersionOptions) => Promise<ProjectFileVersion | null>;
    matchVersionContent: (content: string, versionId?: string) => Promise<ProjectFileVersionContentMatch>;
 +  markDeleted: () => Promise<void>;
  }
-@@ -148,5 +149,7 @@ export async function withProjectFileVersionLock<T>(
+ 
+ export interface ProjectFileVersionContentMatch {
+@@ -175,6 +176,8 @@ export async function withProjectFileVersionLock<T>(
+           content,
            versionId,
          ),
 +      markDeleted: () =>
@@ -689,7 +765,8 @@ index 1ba2efa..0000000 100644
      }),
    );
  }
-@@ -548,11 +551,20 @@ export async function markProjectFileVersionStoreDeleted(
+@@ -569,13 +572,22 @@ export async function markProjectFileVersionStoreDeleted(
+   const safeName = validateUserFileName(fileName);
    if (!/\.html?$/i.test(safeName)) return;
    assertProjectAvailable(projectsRoot, projectId, metadata);
 -  await withVersionFileLock(projectsRoot, projectId, safeName, async () => {
@@ -699,7 +776,6 @@ index 1ba2efa..0000000 100644
 -      currentVersionId: state.currentVersionId,
 -      deletedAt: Date.now(),
 -    });
--  });
 +  await withVersionFileLock(projectsRoot, projectId, safeName, () =>
 +    markProjectFileVersionStoreDeletedUnlocked(projectsRoot, projectId, safeName),
 +  );
@@ -716,25 +792,30 @@ index 1ba2efa..0000000 100644
 +  await writeVersionManifest(projectsRoot, projectId, safeName, state.entries, {
 +    currentVersionId: state.currentVersionId,
 +    deletedAt: Date.now(),
-+  });
+   });
  }
+ 
 diff --git a/apps/daemon/src/projects.ts b/apps/daemon/src/projects.ts
-index a42b9c5..0000000 100644
+index a42b9c5..7fb6b08 100644
 --- a/apps/daemon/src/projects.ts
 +++ b/apps/daemon/src/projects.ts
-@@ -8,4 +8,5 @@
+@@ -7,6 +7,7 @@
+ // All paths flowing in from HTTP handlers are validated against the project
  // directory to prevent path traversal — see resolveSafe().
  
 +import { randomUUID } from 'node:crypto';
  import { constants as fsConstants, createReadStream } from 'node:fs';
  import { link, lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, unlink, writeFile } from 'node:fs/promises';
-@@ -39,4 +40,5 @@ export const projectFileRenameTestHooks = {
+ import path from 'node:path';
+@@ -45,6 +46,7 @@ export const projectFileRenameTestHooks = {
+   beforeCommit: null as null | ((paths: { source: string; target: string }) => Promise<void> | void),
  };
  export const projectFileWriteTestHooks = {
 +  beforeCommit: null as null | ((write: { safeName: string; target: string; body: Buffer | string }) => Promise<void> | void),
    afterCommit: null as null | ((write: { safeName: string; target: string; body: Buffer | string }) => Promise<void> | void),
  };
-@@ -864,6 +866,6 @@ export async function writeProjectFile(
+ 
+@@ -850,7 +852,7 @@ export async function writeProjectFile(
    projectId,
    name,
    body,
@@ -742,7 +823,8 @@ index a42b9c5..0000000 100644
 +  { overwrite = true, artifactManifest = null, atomicReplace = false } = {},
    metadata?,
  ) {
-@@ -918,5 +945,28 @@ export async function writeProjectFile(
+   assertVisibleForImportedProject(name, metadata);
+@@ -923,7 +925,30 @@ export async function writeProjectFile(
        }
      }
    }
@@ -772,12 +854,16 @@ index a42b9c5..0000000 100644
 +    await writeFile(target, body);
 +  }
    await projectFileWriteTestHooks.afterCommit?.({ safeName, target, body });
+   if (validatedManifest) {
+     const manifestFileName = artifactManifestNameFor(safeName);
 diff --git a/apps/daemon/src/routes/project/index.ts b/apps/daemon/src/routes/project/index.ts
-index 950ad7c..0000000 100644
+index 950ad7c..d887a26 100644
 --- a/apps/daemon/src/routes/project/index.ts
 +++ b/apps/daemon/src/routes/project/index.ts
-@@ -149,0 +149,28 @@ import { cancelRunsOwnedBy } from './cancel-owned-runs.js';
-+
+@@ -159,6 +159,34 @@ import { localPluginRegistryScope } from '../../plugins/local-source.js';
+ import type { WorkspaceDirectoryFetchResult } from '../../collab/vela-workspace-context.js';
+ import { cancelRunsOwnedBy } from './cancel-owned-runs.js';
+ 
 +const PROJECT_FILE_CONTENT_DIGEST_RE = /^[a-f0-9]{64}$/u;
 +
 +class ProjectFileVersionConflictError extends Error {
@@ -805,9 +891,14 @@ index 950ad7c..0000000 100644
 +    },
 +  });
 +}
-@@ -5638 +5664,56 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFileRoutesDeps) {
-   const previewScopeRe = /^[A-Za-z0-9_-]{8,128}$/u;
 +
+ export function rewriteOutsideExecutableHtmlRanges(
+   html: string,
+   rewriteChunk: (chunk: string) => string,
+@@ -5633,6 +5661,61 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFile
+   ].join('; ');
+   const previewScopeRe = /^[A-Za-z0-9_-]{8,128}$/u;
+ 
 +  type FileMutationPrecondition =
 +    | { enabled: false }
 +    | { enabled: true; expectedContentDigest: string | null };
@@ -862,7 +953,11 @@ index 950ad7c..0000000 100644
 +      );
 +    }
 +  }
-@@ -6934,6 +7042,29 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFileRoutesDeps) {
++
+   function setProjectPreviewHeaders(res: Response) {
+     res.setHeader('Cache-Control', 'no-store');
+     res.setHeader('X-Content-Type-Options', 'nosniff');
+@@ -6959,8 +7042,31 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFile
          project.id,
          'writeFiles',
        )) return;
@@ -894,7 +989,9 @@ index 950ad7c..0000000 100644
 +        await markProjectFileVersionStoreDeleted(PROJECTS_DIR, projectId, rawSplat, project?.metadata);
 +      }
        // Tombstone, not delete: an HTML card must be able to say "the current
-@@ -6950,4 +7073,7 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFileRoutesDeps) {
+       // file is gone" rather than silently opening whatever later takes the
+       // name. Image cards keep resolving their own snapshot either way.
+@@ -6973,6 +7079,9 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFile
        const body = { ok: true };
        res.json(body);
      } catch (err: any) {
@@ -902,7 +999,10 @@ index 950ad7c..0000000 100644
 +        return sendProjectFileVersionConflict(res, sendApiError, err);
 +      }
        const status = err && err.code === 'ENOENT' ? 404 : 400;
-@@ -7441,3 +7569,20 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFileRoutesDeps) {
+       sendApiError(
+         res,
+@@ -7468,6 +7577,23 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFile
+         if (rejectInternalVersionPath(res, name)) return;
          const desiredName = sanitizePath(name);
          if (rejectInternalVersionPath(res, desiredName)) return;
 +        let precondition: FileMutationPrecondition;
@@ -923,13 +1023,20 @@ index 950ad7c..0000000 100644
 +          );
 +        }
          const requestedSource = uploadProject && /\.html?$/i.test(desiredName)
-@@ -7463,2 +7598,5 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFileRoutesDeps) {
+           ? requestProjectFileVersionUploadSource(req.body)
+           : null;
+@@ -7498,6 +7624,9 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFile
+               versionLock,
+             )
              : undefined;
 +          if (precondition.enabled && uploadProject) {
 +            await assertFileMutationPrecondition(uploadProject, desiredName, precondition);
 +          }
            const meta = artifact === true
-@@ -7478,4 +7616,6 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFileRoutesDeps) {
+             ? await createProjectArtifactFile({
+               projectsRoot: PROJECTS_DIR,
+@@ -7513,7 +7642,9 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFile
+               buf,
                {
                  artifactManifest,
 -                ...(overwrite === false ? { overwrite: false } : {}),
@@ -937,7 +1044,9 @@ index 950ad7c..0000000 100644
 +                  ? { overwrite: false } : {}),
 +                ...(precondition.enabled ? { atomicReplace: true } : {}),
                },
-@@ -7507,14 +7647,21 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFileRoutesDeps) {
+               uploadProject?.metadata,
+             );
+@@ -7542,25 +7673,36 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFile
                );
              })()
              : null;
@@ -962,18 +1071,22 @@ index 950ad7c..0000000 100644
              (versionLock) => writeAndCapture(versionLock),
            )
            : await writeAndCapture();
-@@ -7523,3 +7670,4 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFileRoutesDeps) {
+         /** @type {import('@open-design/contracts').ProjectFileResponse} */
          const body = {
            file: meta,
 +          contentDigest,
            ...(versionCapture ? { version: versionCapture.version } : {}),
-@@ -7533,2 +7681,5 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFileRoutesDeps) {
+           ...(versionCapture?.versionWarning ? { versionWarning: versionCapture.versionWarning } : {}),
+         };
+         res.json(body);
        } catch (err: any) {
 +        if (err instanceof ProjectFileVersionConflictError) {
 +          return sendProjectFileVersionConflict(res, sendApiError, err);
 +        }
          const message = String(err?.message || err);
-@@ -7635,6 +7786,29 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFileRoutesDeps) {
+         if (/^invalid (source|versionSource);/u.test(message)) {
+           return sendApiError(res, 400, 'BAD_REQUEST', message);
+@@ -7670,8 +7812,31 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFile
          delProject.id,
          'writeFiles',
        )) return;
@@ -1005,7 +1118,9 @@ index 950ad7c..0000000 100644
 +        await markProjectFileVersionStoreDeleted(PROJECTS_DIR, req.params.id, req.params.name, delProject?.metadata);
 +      }
        try {
-@@ -7650,4 +7821,7 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFileRoutesDeps) {
+         deleteWorkspaceArtifact(db, req.params.id, req.params.name);
+       } catch (error) {
+@@ -7681,6 +7846,9 @@ export function registerProjectFileRoutes(app: Express, ctx: RegisterProjectFile
        const body = { ok: true };
        res.json(body);
      } catch (err: any) {
@@ -1013,9 +1128,11 @@ index 950ad7c..0000000 100644
 +        return sendProjectFileVersionConflict(res, sendApiError, err);
 +      }
        const status = err && err.code === 'ENOENT' ? 404 : 400;
+       sendApiError(
+         res,
 diff --git a/apps/daemon/tests/mcp-chatgpt-profile.test.ts b/apps/daemon/tests/mcp-chatgpt-profile.test.ts
 new file mode 100644
-index 0000000..0000000
+index 0000000..80a994c
 --- /dev/null
 +++ b/apps/daemon/tests/mcp-chatgpt-profile.test.ts
 @@ -0,0 +1,252 @@
@@ -1271,68 +1388,9 @@ index 0000000..0000000
 +    expect(posts).toHaveLength(1);
 +  });
 +});
-diff --git a/apps/daemon/tests/projects-atomic-write.test.ts b/apps/daemon/tests/projects-atomic-write.test.ts
-new file mode 100644
-index 0000000..0000000
---- /dev/null
-+++ b/apps/daemon/tests/projects-atomic-write.test.ts
-@@ -0,0 +1,53 @@
-+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-+import os from 'node:os';
-+import path from 'node:path';
-+import { afterEach, describe, expect, it } from 'vitest';
-+
-+import {
-+  projectFileWriteTestHooks,
-+  writeProjectFile,
-+} from '../src/projects.js';
-+
-+let root: string | null = null;
-+
-+describe('project file atomic commit', () => {
-+  afterEach(async () => {
-+    projectFileWriteTestHooks.beforeCommit = null;
-+    projectFileWriteTestHooks.afterCommit = null;
-+    if (root) await rm(root, { recursive: true, force: true });
-+    root = null;
-+  });
-+
-+  it('preserves a competing file when a create-only target appears before commit', async () => {
-+    root = await mkdtemp(path.join(os.tmpdir(), 'od-atomic-write-'));
-+    const projectId = 'project-1';
-+    const target = path.join(root, projectId, 'new.txt');
-+    projectFileWriteTestHooks.beforeCommit = async () => {
-+      await writeFile(target, 'external-winner', 'utf8');
-+    };
-+
-+    await expect(writeProjectFile(
-+      root,
-+      projectId,
-+      'new.txt',
-+      Buffer.from('ours'),
-+      { overwrite: false },
-+    )).rejects.toMatchObject({ code: 'EEXIST' });
-+
-+    expect(await readFile(target, 'utf8')).toBe('external-winner');
-+  });
-+
-+  it('uses a completed temp file as the atomic replacement commit', async () => {
-+    root = await mkdtemp(path.join(os.tmpdir(), 'od-atomic-write-'));
-+    const projectId = 'project-2';
-+    await writeProjectFile(root, projectId, 'file.txt', Buffer.from('v1'));
-+    await writeProjectFile(
-+      root,
-+      projectId,
-+      'file.txt',
-+      Buffer.from('v2'),
-+      { atomicReplace: true },
-+    );
-+    expect(await readFile(path.join(root, projectId, 'file.txt'), 'utf8')).toBe('v2');
-+  });
-+});
 diff --git a/apps/daemon/tests/project-file-preconditions.test.ts b/apps/daemon/tests/project-file-preconditions.test.ts
 new file mode 100644
-index 0000000..0000000
+index 0000000..d86673f
 --- /dev/null
 +++ b/apps/daemon/tests/project-file-preconditions.test.ts
 @@ -0,0 +1,170 @@
@@ -1504,5 +1562,64 @@ index 0000000..0000000
 +    expect(removed.ok).toBe(true);
 +    const missing = await fetch(`${baseUrl}/api/projects/${projectId}/raw/delete-me.txt`);
 +    expect(missing.status).toBe(404);
++  });
++});
+diff --git a/apps/daemon/tests/projects-atomic-write.test.ts b/apps/daemon/tests/projects-atomic-write.test.ts
+new file mode 100644
+index 0000000..74dd6cf
+--- /dev/null
++++ b/apps/daemon/tests/projects-atomic-write.test.ts
+@@ -0,0 +1,53 @@
++import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
++import os from 'node:os';
++import path from 'node:path';
++import { afterEach, describe, expect, it } from 'vitest';
++
++import {
++  projectFileWriteTestHooks,
++  writeProjectFile,
++} from '../src/projects.js';
++
++let root: string | null = null;
++
++describe('project file atomic commit', () => {
++  afterEach(async () => {
++    projectFileWriteTestHooks.beforeCommit = null;
++    projectFileWriteTestHooks.afterCommit = null;
++    if (root) await rm(root, { recursive: true, force: true });
++    root = null;
++  });
++
++  it('preserves a competing file when a create-only target appears before commit', async () => {
++    root = await mkdtemp(path.join(os.tmpdir(), 'od-atomic-write-'));
++    const projectId = 'project-1';
++    const target = path.join(root, projectId, 'new.txt');
++    projectFileWriteTestHooks.beforeCommit = async () => {
++      await writeFile(target, 'external-winner', 'utf8');
++    };
++
++    await expect(writeProjectFile(
++      root,
++      projectId,
++      'new.txt',
++      Buffer.from('ours'),
++      { overwrite: false },
++    )).rejects.toMatchObject({ code: 'EEXIST' });
++
++    expect(await readFile(target, 'utf8')).toBe('external-winner');
++  });
++
++  it('uses a completed temp file as the atomic replacement commit', async () => {
++    root = await mkdtemp(path.join(os.tmpdir(), 'od-atomic-write-'));
++    const projectId = 'project-2';
++    await writeProjectFile(root, projectId, 'file.txt', Buffer.from('v1'));
++    await writeProjectFile(
++      root,
++      projectId,
++      'file.txt',
++      Buffer.from('v2'),
++      { atomicReplace: true },
++    );
++    expect(await readFile(path.join(root, projectId, 'file.txt'), 'utf8')).toBe('v2');
 +  });
 +});
