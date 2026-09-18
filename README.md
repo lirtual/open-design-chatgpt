@@ -8,7 +8,8 @@ This bundle implements the accepted `open-design-chatgpt-spec.md` as a small ups
 - Pinned commit: `eca7c7ab989852fb586384e19bcb6a6f2d7321f4`
 - Integration patch: `patches/open-design-chatgpt-v0.1.patch`
 - Implementation/CI status: validated against the pinned upstream commit. GitHub Actions run `35083316049` passed the focused integration tests, daemon typecheck/build, repository guard, root typecheck, and all four daemon test shards.
-- Remaining acceptance gate: real ChatGPT Web installation and write-path acceptance (G1), which depends on the capabilities enabled for the target ChatGPT account/workspace and cannot be replaced by repository tests.
+- Real stdio MCP acceptance: passed in GitHub Actions run `35337185229`, including restricted discovery, authorization rejection, create/read/write/conflict/preview/HTML-export/delete through a real MCP SDK client and real patched daemon.
+- Remaining product gate: real ChatGPT Web installation/write acceptance. On the current target ChatGPT Plus account, the required custom MCP write/modify workspace entry was not available during the 2026-09-18 manual check; this is recorded as a product/account capability block rather than an implementation failure.
 
 ## Apply
 
@@ -50,6 +51,7 @@ The spec requires write actions, so G1 must be performed on a ChatGPT account/wo
 - `patches/open-design-chatgpt-v0.1.patch` — upstream code/test patch.
 - `compatibility.json` — pinned compatibility/capability declaration.
 - `.github/workflows/validate.yml` — checks the patch against the exact upstream commit and runs focused validation plus the upstream-style four-shard daemon regression suite.
+- `.github/workflows/mcp-acceptance.yml` and `scripts/mcp-acceptance.mjs` — manually or sentinel-triggered real stdio MCP acceptance against a temporary project.
 
 ## Non-goals retained
 
