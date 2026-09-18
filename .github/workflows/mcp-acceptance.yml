@@ -1,0 +1,67 @@
+name: MCP acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcp-acceptance-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  mcp-acceptance:
+    name: Real stdio MCP acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout integration repository
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned OpenDesign upstream
+        uses: actions/checkout@v4
+        with:
+          repository: nexu-io/open-design
+          ref: eca7c7ab989852fb586384e19bcb6a6f2d7321f4
+          path: upstream
+
+      - name: Verify patch applies cleanly
+        run: git -C upstream apply --check "$GITHUB_WORKSPACE/patches/open-design-chatgpt-v0.1.patch"
+
+      - name: Apply integration patch
+        run: git -C upstream apply "$GITHUB_WORKSPACE/patches/open-design-chatgpt-v0.1.patch"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v5
+        with:
+          version: 10.33.2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: upstream/pnpm-lock.yaml
+
+      - name: Install upstream dependencies
+        working-directory: upstream
+        run: pnpm install --frozen-lockfile
+
+      - name: Build daemon dependencies
+        working-directory: upstream
+        run: pnpm --filter '@open-design/daemon^...' --workspace-concurrency=4 --if-present run build
+
+      - name: Build patched daemon
+        working-directory: upstream
+        run: pnpm --filter @open-design/daemon build
+
+      - name: Stage acceptance client beside daemon
+        run: cp scripts/mcp-acceptance.mjs upstream/apps/daemon/mcp-acceptance.mjs
+
+      - name: Run real stdio MCP acceptance
+        working-directory: upstream/apps/daemon
+        env:
+          NODE_ENV: test
+        run: node mcp-acceptance.mjs
