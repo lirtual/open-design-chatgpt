@@ -65,9 +65,41 @@ For the pinned upstream baseline, repository CI verifies the implementation-side
 
 This does **not** replace real ChatGPT Web acceptance.
 
-## Manual ChatGPT Web gate
+## Real stdio MCP acceptance
 
-Real ChatGPT Web installation and write-path acceptance is a separate G1/manual gate. The target ChatGPT account/workspace must expose the required custom MCP write/modify capabilities; mock MCP tests and repository CI cannot substitute for this acceptance step. Local/private MCP connectivity must use a supported ChatGPT transport rather than exposing the OpenDesign daemon publicly.
+G1-Local passed on 2026-09-18 against the same pinned OpenDesign baseline.
+
+- Workflow: `.github/workflows/mcp-acceptance.yml`
+- Acceptance client: `scripts/mcp-acceptance.mjs`
+- GitHub Actions run: `35337185229`
+- Job: `Real stdio MCP acceptance`
+- Result: success
+- Transport: real MCP stdio using `@modelcontextprotocol/sdk`
+- Daemon: real patched OpenDesign daemon with a temporary project
+- Profile: `OD_MCP_PROFILE=chatgpt`
+
+The successful protocol-level acceptance verified:
+
+- MCP initialize/connect;
+- the exact restricted `tools/list` surface;
+- hidden `start_run` rejection at dispatch;
+- unauthorized project rejection;
+- stable project creation and allowlist-filtered `list_projects`;
+- create-only `write_file` with `{ missing: true }`;
+- full-file SHA-256 digest retrieval;
+- stale digest conflict rejection;
+- conditioned overwrite and read-after-write;
+- same-machine preview URL generation;
+- daemon-side standalone HTML export;
+- conditioned file deletion.
+
+The workflow uses only a temporary acceptance project and removes it during cleanup. PDF is intentionally excluded from the Ubuntu acceptance runner because PDF depends on the existing OpenDesign desktop renderer.
+
+## ChatGPT Web product gate
+
+The implementation-side G1 local protocol gate is therefore complete. Real ChatGPT Web installation/write acceptance remains a separate product gate. On the current target ChatGPT Plus account, the required custom MCP write/modify workspace entry was not available during the 2026-09-18 manual check, so this gate is recorded as **blocked by target account/product capability**, not as an implementation failure.
+
+When a target ChatGPT account/workspace exposes the required custom MCP write/modify capability, rerun the Web installation/write path. Local/private MCP connectivity must use a supported ChatGPT transport rather than exposing the OpenDesign daemon publicly.
 
 ## Renderer conditions
 
