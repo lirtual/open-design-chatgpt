@@ -39,6 +39,13 @@ function firstText(result) {
   return typeof item?.text === 'string' ? item.text : '';
 }
 
+function allText(result) {
+  return (result?.content ?? [])
+    .filter((entry) => entry?.type === 'text' && typeof entry?.text === 'string')
+    .map((entry) => entry.text)
+    .join('\n');
+}
+
 function structured(result) {
   if (result?.structuredContent && typeof result.structuredContent === 'object') {
     return result.structuredContent;
@@ -192,7 +199,7 @@ try {
   assert.match(readV2Data.contentDigest ?? '', /^[a-f0-9]{64}$/);
   assert.notEqual(readV2Data.contentDigest, digestV1);
   const digestV2 = readV2Data.contentDigest;
-  assert(firstText(readV2).includes('MCP acceptance v2'));
+  assert(allText(readV2).includes('MCP acceptance v2'));
   passed('read-after-write', { digest: digestV2 });
 
   const preview = assertToolSuccess(await client.callTool({
