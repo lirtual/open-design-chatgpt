@@ -2,6 +2,9 @@ name: MCP acceptance
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - ".github/mcp-acceptance.trigger"
 
 permissions:
   contents: read
