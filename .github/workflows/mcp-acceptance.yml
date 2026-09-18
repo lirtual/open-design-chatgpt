@@ -5,12 +5,15 @@ on:
   push:
     paths:
       - ".github/mcp-acceptance.trigger"
+  pull_request:
+    paths:
+      - ".github/mcp-acceptance.trigger"
 
 permissions:
   contents: read
 
 concurrency:
-  group: mcp-acceptance-${{ github.ref }}
+  group: mcp-acceptance-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
